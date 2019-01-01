@@ -657,6 +657,20 @@ void TargetLoweringBase::initActions() {
 
     // For most targets @llvm.get.dynamic.area.offset just returns 0.
     setOperationAction(ISD::GET_DYNAMIC_AREA_OFFSET, VT, Expand);
+
+    // For most targets, non power of 2 types default to expand.
+    if (VT.isScalarInteger() && !VT.isPow2Size()) {
+      std::fill(std::begin(OpActions[(unsigned)VT.SimpleTy]),
+                std::end(OpActions[(unsigned)VT.SimpleTy]), Expand);
+      for (MVT OtherVT : MVT::all_valuetypes()) {
+        for (auto VTs : {std::make_pair(VT, OtherVT),
+                         std::make_pair(OtherVT, VT)}) {
+          for (unsigned ExtType : {ISD::EXTLOAD, ISD::ZEXTLOAD, ISD::SEXTLOAD})
+            setLoadExtAction(ExtType, VTs.first, VTs.second, Expand);
+          setTruncStoreAction(VTs.first, VTs.second, Expand);
+        }
+      }
+    }
   }
 
   // Most targets ignore the @llvm.prefetch intrinsic.
@@ -1088,13 +1102,21 @@ void TargetLoweringBase::computeRegisterProperties(
 
   // Every integer value type larger than this largest register takes twice as
   // many registers to represent as the previous ValueType.
-  for (unsigned ExpandedReg = LargestIntReg + 1;
+  for (unsigned HalfReg = LargestIntReg, ExpandedReg = LargestIntReg + 1;
        ExpandedReg <= MVT::LAST_INTEGER_VALUETYPE; ++ExpandedReg) {
-    NumRegistersForVT[ExpandedReg] = 2*NumRegistersForVT[ExpandedReg-1];
+    MVT ExpandedVT = (MVT::SimpleValueType)ExpandedReg;
+    NumRegistersForVT[ExpandedReg] = 2*NumRegistersForVT[HalfReg];
     RegisterTypeForVT[ExpandedReg] = (MVT::SimpleValueType)LargestIntReg;
-    TransformToType[ExpandedReg] = (MVT::SimpleValueType)(ExpandedReg - 1);
-    ValueTypeActions.setTypeAction((MVT::SimpleValueType)ExpandedReg,
-                                   TypeExpandInteger);
+    if (ExpandedVT.isPow2Size()) {
+      TransformToType[ExpandedReg] = (MVT::SimpleValueType)HalfReg;
+      ValueTypeActions.setTypeAction(ExpandedVT, TypeExpandInteger);
+      HalfReg = ExpandedReg;
+    } else {
+      assert(ExpandedReg < MVT::LAST_INTEGER_VALUETYPE &&
+             "Expected a pow 2 type larger than any non pow 2 type");
+      TransformToType[ExpandedReg] = (MVT::SimpleValueType)(ExpandedReg + 1);
+      ValueTypeActions.setTypeAction(ExpandedVT, TypePromoteInteger);
+    }
   }
 
   // Inspect all of the ValueType's smaller than the largest integer

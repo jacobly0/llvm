@@ -695,6 +695,9 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
 
     // Vector reductions
     for (MVT VT : MVT::integer_valuetypes()) {
+      if (!VT.isPow2Size())
+        continue;
+
       setOperationAction(ISD::VECREDUCE_ADD, VT, Custom);
       setOperationAction(ISD::VECREDUCE_SMAX, VT, Custom);
       setOperationAction(ISD::VECREDUCE_SMIN, VT, Custom);
